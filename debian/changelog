@@ -1,3 +1,59 @@
+electric-fence (2.2.4) unstable; urgency=medium (high for hurd users)
+
+  * Patch from Richard Kettlewell to improve the semaphore strategy of
+    efence. We no longer use recursive mutexes, and the code is instead
+    clearer about when it should and shouldn't be locking. This means that
+    electric-fence builds on hurd, which it hasn't previously.
+
+ -- Matthew Vernon <matthew@debian.org>  Tue, 17 Jul 2012 18:40:21 +0100
+
+electric-fence (2.2.3) unstable; urgency=low
+
+  * Fix the build system such that we actually pass -fno-builtin-malloc to
+    gcc. Thanks to Ian Jackson and Colin Watson for helping me disentangle
+    this (Closes: #679320)
+
+ -- Matthew Vernon <matthew@debian.org>  Mon, 02 Jul 2012 18:57:41 +0100
+
+electric-fence (2.2.2) unstable; urgency=low
+
+  * patch from Petr Machata to add posix_memalign support (Closes: #599938)
+  * Update standards-version
+  * Update to use debhelper compatibility version 8
+  * Don't ignore errors from make clean
+  * set -e in postrm
+
+ -- Matthew Vernon <matthew@debian.org>  Wed, 27 Jun 2012 22:15:04 +0100
+
+electric-fence (2.2.1) unstable; urgency=low
+
+  * patch from Brandon (modified a little) to handle noopt 
+    DEB_BUILD_OPTIONS (Closes: #461428)
+  * patch from Fedora (via Botond Botyanszki) replacing mutex locking with
+    semaphores (Closes: #241156, #365382)
+  
+ -- Matthew Vernon <matthew@debian.org>  Wed, 27 Jun 2012 00:50:42 +0100
+
+electric-fence (2.1.19) unstable; urgency=low
+
+  * patch from Petr Salinger to handle both SIGBUS and SIGSEGV in eftest.c
+    on FreeBSD-based architectures (Closes: #643866)
+
+ -- Matthew Vernon <matthew@debian.org>  Fri, 07 Oct 2011 08:38:44 +0100
+
+electric-fence (2.1.18) unstable; urgency=low
+
+  * refine the previous patch to use -fno-builtin-malloc instead
+
+ -- Matthew Vernon <matthew@debian.org>  Tue, 27 Sep 2011 21:44:35 +0100
+
+electric-fence (2.1.17) unstable; urgency=low
+
+  * patch from Colin Watson to build with -fno-tree-dse as otherwise gcc
+    >=4.5 mis-optimises AllocateMoreSlots() (Closes: #625756).
+
+ -- Matthew Vernon <matthew@debian.org>  Fri, 09 Sep 2011 13:32:50 +0100
+
 electric-fence (2.1.16) unstable; urgency=medium
 
   * apply patch from Petr Salinger to fix FTBFS on GNU/kfreeBSD 

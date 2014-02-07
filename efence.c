@@ -34,7 +34,11 @@
 #include <unistd.h>
 #include <memory.h>
 #include <string.h>
-#include <pthread.h>
+#include <errno.h>
+#ifdef USE_SEMAPHORE
+# include <pthread.h>
+# include <semaphore.h>
+#endif
 
 #ifdef	malloc
 #undef	malloc
@@ -44,8 +48,8 @@
 #undef	calloc
 #endif
 
-static const char	version[] = "\n  Electric Fence 2.1"
- " Copyright (C) 1987-1998 Bruce Perens.\n";
+static const char	version[] = "\n  Electric Fence 2.2"
+ " Copyright (C) 1987-1999 Bruce Perens <bruce@perens.com>\n";
 
 /*
  * MEMORY_CREATION_SIZE is the amount of memory to get from the operating
@@ -78,6 +82,9 @@ struct _Slot {
 	Mode		mode;
 };
 typedef struct _Slot	Slot;
+
+static void *memalign_locked(size_t alignment, size_t userSize);
+static void free_locked(void *address);
 
  /*
  * EF_DISABLE_BANNER is a global variable used to control whether
@@ -129,11 +136,10 @@ int		EF_PROTECT_BELOW = -1;
 int		EF_ALLOW_MALLOC_0 = -1;
 
 /*
- * EF_FREE_WIPES is set if Electric Fence is to wipe the memory content
- * of freed blocks.  This makes it easier to check if memory is freed or
- * not
+ * EF_FILL is set to 0-255 if Electric Fence should fill all new allocated
+ * memory with the specified value.
  */
-int            EF_FREE_WIPES = -1;
+int		EF_FILL = -1;
 
 /*
  * allocationList points to the array of slot structures used to manage the
@@ -179,49 +185,56 @@ static int		internalUse = 0;
  */
 static int		noAllocationListProtection = 0;
 
+#ifdef USE_SEMAPHORE
+
+#include <stdbool.h>
+
+#pragma weak sem_init
+#pragma weak sem_post
+#pragma weak sem_wait
+
+static int		pthread_initialization = 0;
+
+/*
+ * EF_sem is a semaphore used to allow one thread at a time into
+ * these routines.
+ * Also, we use semEnabled as a boolean to see if we should be
+ * using the semaphore.
+ */
+static sem_t      EF_sem = { 0 };
+static int        semEnabled = 0;
+#endif
+
 /*
  * bytesPerPage is set at run-time to the number of bytes per virtual-memory
  * page, as returned by Page_Size().
  */
 static size_t		bytesPerPage = 0;
 
- /*
- * mutex to enable multithreaded operation
- */
-static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_t mutexowner = (pthread_t) -1;
-static int locknr=0;
-
-
-static void lock() {
-    if (pthread_mutex_trylock(&mutex)) {
-       if (mutexowner==pthread_self()) {
-           locknr++;
-           return;
-       } else {
-           pthread_mutex_lock(&mutex);
-       }
-    } 
-    mutexowner=pthread_self();
-    locknr=1;
-}
-
-static void unlock() {
-    locknr--;
-    if (!locknr) {
-       mutexowner=(pthread_t)-1;
-       pthread_mutex_unlock(&mutex);
-    }
-}
-
-/*
- * internalError is called for those "shouldn't happen" errors in the
- * allocator.
- */
 static void
-internalError(void)
+lock()
 {
-	EF_Abort("Internal error in allocator.");
+#ifdef USE_SEMAPHORE
+	/* Are we using a semaphore? */
+	if (!semEnabled)
+		return;
+
+	/* Wait for the semaphore. */
+	while (sem_wait(&EF_sem) < 0)
+		/* try again */;
+#endif	/* USE_SEMAPHORE */
+}
+
+static void
+release()
+{
+#ifdef	USE_SEMAPHORE
+	/* Are we using a semaphore? */
+	if (!semEnabled)
+		return;
+	if (sem_post(&EF_sem) < 0)
+	  EF_InternalError("Failed to post the semaphore.");
+#endif /* USE_SEMAPHORE */
 }
 
 /*
@@ -245,6 +258,14 @@ initialize(void)
 
        if ( EF_DISABLE_BANNER == 0 )
                EF_Print(version);
+
+
+#ifdef USE_SEMAPHORE
+	if (sem_init != NULL && !pthread_initialization && sem_init(&EF_sem, 0, 1) >= 0) {
+		semEnabled = 1;
+	}
+#endif
+	lock();
 
 	/*
 	 * Import the user's environment specification of the default
@@ -305,13 +326,11 @@ initialize(void)
 	}
 
 	/*
-	 * See if the user wants us to wipe out freed memory.
+	 * Check if we should be filling new memory with a value.
 	 */
-	if ( EF_FREE_WIPES == -1 ) {
-	        if ( (string = getenv("EF_FREE_WIPES")) != 0 )
-	                EF_FREE_WIPES = (atoi(string) != 0);
-	        else
-	                EF_FREE_WIPES = 0;
+	if ( EF_FILL == -1 ) {
+		if ( (string = getenv("EF_FILL")) != 0)
+			EF_FILL = (unsigned char) atoi(string);
 	}
 
 	/*
@@ -360,7 +379,24 @@ initialize(void)
 	 * Account for the two slot structures that we've used.
 	 */
 	unUsedSlots = slotCount - 2;
+	
+	release();
 }
+
+#ifdef USE_SEMAPHORE
+void
+__libc_malloc_pthread_startup (bool first_time)
+{
+	if (first_time) {
+		pthread_initialization = 1;
+		initialize ();
+	} else {
+		pthread_initialization = 0;
+		if (!semEnabled && sem_init != NULL && sem_init(&EF_sem, 0, 1) >= 0)
+			semEnabled = 1;
+	}
+}
+#endif
 
 /*
  * allocateMoreSlots is called when there are only enough slot structures
@@ -377,7 +413,7 @@ allocateMoreSlots(void)
 	noAllocationListProtection = 1;
 	internalUse = 1;
 
-	newAllocation = malloc(newSize);
+	newAllocation = memalign_locked(EF_ALIGNMENT, newSize);
 	memcpy(newAllocation, allocationList, allocationListSize);
 	memset(&(((char *)newAllocation)[allocationListSize]), 0, bytesPerPage);
 
@@ -386,7 +422,7 @@ allocateMoreSlots(void)
 	slotCount += slotsPerPage;
 	unUsedSlots += slotsPerPage;
 
-	free(oldAllocation);
+	free_locked(oldAllocation);
 
 	/*
 	 * Keep access to the allocation list open at this point, because
@@ -418,8 +454,8 @@ allocateMoreSlots(void)
  * so that it won't waste even more. It's slow, but thrashing because your
  * working set is too big for a system's RAM is even slower. 
  */
-extern C_LINKAGE void *
-memalign(size_t alignment, size_t userSize)
+static void *
+memalign_locked(size_t alignment, size_t userSize)
 {
 	register Slot *	slot;
 	register size_t	count;
@@ -428,12 +464,7 @@ memalign(size_t alignment, size_t userSize)
 	size_t		internalSize;
 	size_t		slack;
 	char *		address;
-
-	lock();
-
-	if ( allocationList == 0 )
-		initialize();
-
+	
 	if ( userSize == 0 && !EF_ALLOW_MALLOC_0 )
 		EF_Abort("Allocating 0 bytes, probably a bug.");
 
@@ -513,7 +544,7 @@ memalign(size_t alignment, size_t userSize)
 		slot++;
 	}
 	if ( !emptySlots[0] )
-		internalError();
+		EF_InternalError("No empty slot 0.");
 
 	if ( !fullSlot ) {
 		/*
@@ -525,7 +556,7 @@ memalign(size_t alignment, size_t userSize)
 		size_t	chunkSize = MEMORY_CREATION_SIZE;
 
 		if ( !emptySlots[1] )
-			internalError();
+			EF_InternalError("No empty slot 1.");
 
 		if ( chunkSize < internalSize )
 			chunkSize = internalSize;
@@ -540,6 +571,13 @@ memalign(size_t alignment, size_t userSize)
 		fullSlot->internalSize = chunkSize;
 		fullSlot->mode = FREE;
 		unUsedSlots--;
+		
+		/* Fill the slot if it was specified to do so. */
+		if ( EF_FILL != -1 )
+			memset(
+			 (char *)fullSlot->internalAddress
+			,EF_FILL
+			,chunkSize);
 	}
 
 	/*
@@ -584,7 +622,7 @@ memalign(size_t alignment, size_t userSize)
 		address += internalSize - bytesPerPage;
 
 		/* Set up the "dead" page. */
-		Page_DenyAccess(address, bytesPerPage);
+		Page_Delete(address, bytesPerPage);
 
 		/* Figure out what address to give the user. */
 		address -= userSize;
@@ -598,7 +636,7 @@ memalign(size_t alignment, size_t userSize)
 		address = (char *)fullSlot->internalAddress;
 
 		/* Set up the "dead" page. */
-		Page_DenyAccess(address, bytesPerPage);
+		Page_Delete(address, bytesPerPage);
 			
 		address += bytesPerPage;
 
@@ -617,8 +655,40 @@ memalign(size_t alignment, size_t userSize)
 	if ( !internalUse )
 		Page_DenyAccess(allocationList, allocationListSize);
 
-	unlock();
 	return address;
+}
+
+extern C_LINKAGE void *
+memalign(size_t alignment, size_t userSize)
+{
+	void *address;
+	if ( allocationList == 0 )
+		initialize();
+	lock();
+	address = memalign_locked(alignment, userSize);
+	release();
+	return address;
+}
+
+extern C_LINKAGE int
+posix_memalign(void **memptr, size_t alignment, size_t size)
+{
+	/*
+	 * Per standard, posix_memalign returns EINVAL when alignment
+	 * is not a power of two or power of sizeof(void*).  efence
+	 * doesn't check the value of alignment in memalign, but then
+	 * again, memalign was never specified very well, and on some
+	 * systems odd alignments could indeed have been allowed.
+	 */
+	if ((alignment & (alignment - 1))
+	    || alignment % sizeof (void *))
+		return EINVAL;
+
+	void *ptr = memalign (alignment, size);
+	if (ptr == NULL)
+		return ENOMEM;
+	*memptr = ptr;
+	return 0;
 }
 
 /*
@@ -676,22 +746,15 @@ slotForInternalAddressPreviousTo(void * address)
 	return 0;
 }
 
-extern C_LINKAGE void
-free(void * address)
+static void
+free_locked(void * address)
 {
 	Slot *	slot;
 	Slot *	previousSlot = 0;
 	Slot *	nextSlot = 0;
 
-        lock();
-
-        if ( address == 0 ) {
-                unlock();
-                return;
-        }
-
-	if ( allocationList == 0 )
-		EF_Abort("free() called before first malloc().");
+	if ( address == 0 )
+		return;
 
 	if ( !noAllocationListProtection )
 		Page_AllowAccess(allocationList, allocationListSize);
@@ -716,28 +779,36 @@ free(void * address)
 	else
 		slot->mode = FREE;
 
-       if ( EF_FREE_WIPES )
-               memset(slot->userAddress, 0xbd, slot->userSize);
+	/*
+	 * Free memory is _always_ set to deny access. When EF_PROTECT_FREE
+	 * is true, free memory is never reallocated, so it remains access
+	 * denied for the life of the process. When EF_PROTECT_FREE is false, 
+	 * the memory may be re-allocated, at which time access to it will be
+	 * allowed again.
+	 *
+	 * Some operating systems allow munmap() with single-page resolution,
+	 * and allow you to un-map portions of a region, rather than the
+	 * entire region that was mapped with mmap(). On those operating
+	 * systems, we can release protected free pages with Page_Delete(),
+	 * in the hope that the swap space attached to those pages will be
+	 * released as well.
+	 */
+	Page_Delete(slot->internalAddress, slot->internalSize);
 
 	previousSlot = slotForInternalAddressPreviousTo(slot->internalAddress);
 	nextSlot = slotForInternalAddress(
 	 ((char *)slot->internalAddress) + slot->internalSize);
 
-	if ( previousSlot
-	 && (previousSlot->mode == FREE || previousSlot->mode == PROTECTED) ) {
+	if ( previousSlot && previousSlot->mode == slot->mode ) {
 		/* Coalesce previous slot with this one. */
 		previousSlot->internalSize += slot->internalSize;
-		if ( EF_PROTECT_FREE )
-			previousSlot->mode = PROTECTED;
-
 		slot->internalAddress = slot->userAddress = 0;
 		slot->internalSize = slot->userSize = 0;
 		slot->mode = NOT_IN_USE;
 		slot = previousSlot;
 		unUsedSlots++;
 	}
-	if ( nextSlot
-	 && (nextSlot->mode == FREE || nextSlot->mode == PROTECTED) ) {
+	if ( nextSlot && nextSlot->mode == slot->mode ) {
 		/* Coalesce next slot with this one. */
 		slot->internalSize += nextSlot->internalSize;
 		nextSlot->internalAddress = nextSlot->userAddress = 0;
@@ -749,33 +820,36 @@ free(void * address)
 	slot->userAddress = slot->internalAddress;
 	slot->userSize = slot->internalSize;
 
-	/*
-	 * Free memory is _always_ set to deny access. When EF_PROTECT_FREE
-	 * is true, free memory is never reallocated, so it remains access
-	 * denied for the life of the process. When EF_PROTECT_FREE is false, 
-	 * the memory may be re-allocated, at which time access to it will be
-	 * allowed again.
-	 */
-	Page_DenyAccess(slot->internalAddress, slot->internalSize);
-
 	if ( !noAllocationListProtection )
 		Page_DenyAccess(allocationList, allocationListSize);
+}
 
-        unlock();
+extern C_LINKAGE void
+free(void * address)
+{
+
+	if ( address == 0 )
+		return;
+
+	if ( allocationList == 0 )
+		EF_Abort("free() called before first malloc().");
+	
+	lock();
+	free_locked(address);
+	release();
 }
 
 extern C_LINKAGE void *
 realloc(void * oldBuffer, size_t newSize)
 {
- 	void *	newBuffer;
- 	
- 	if (oldBuffer && newSize==0) {
- 		free(oldBuffer);
- 		return NULL;
- 	}
- 	newBuffer = malloc(newSize);
+	void *	newBuffer = 0;
+
+	if ( allocationList == 0 )
+		initialize();	/* This sets EF_ALIGNMENT */
 
         lock();
+
+	newBuffer = memalign_locked(EF_ALIGNMENT, newSize);
 
 	if ( oldBuffer ) {
 		size_t	size;
@@ -798,7 +872,7 @@ realloc(void * oldBuffer, size_t newSize)
 		if ( size > 0 )
 			memcpy(newBuffer, oldBuffer, size);
 
-		free(oldBuffer);
+		free_locked(oldBuffer);
 		noAllocationListProtection = 0;
 		Page_DenyAccess(allocationList, allocationListSize);
 
@@ -807,7 +881,7 @@ realloc(void * oldBuffer, size_t newSize)
 		
 		/* Internal memory was re-protected in free() */
 	}
-	unlock();
+	release();
 
 	return newBuffer;
 }
@@ -815,29 +889,19 @@ realloc(void * oldBuffer, size_t newSize)
 extern C_LINKAGE void *
 malloc(size_t size)
 {
-        void  *allocation;   
- 
-        lock();
-        if ( allocationList == 0 )
-                initialize();   /* This sets EF_ALIGNMENT */
-        allocation=memalign(EF_ALIGNMENT, size); 
+	if ( allocationList == 0 )
+		initialize();	/* This sets EF_ALIGNMENT */
 
-        unlock();
-
-	return allocation;
+	return memalign(EF_ALIGNMENT, size);
 }
 
 extern C_LINKAGE void *
 calloc(size_t nelem, size_t elsize)
 {
 	size_t	size = nelem * elsize;
-        void * allocation;
-        
-        lock();
-        allocation = malloc(size);
-        unlock();
-        memset(allocation, 0, size);
+	void *	allocation = malloc(size);
 
+	memset(allocation, 0, size);
 	return allocation;
 }
 
@@ -848,11 +912,18 @@ calloc(size_t nelem, size_t elsize)
 extern C_LINKAGE void *
 valloc (size_t size)
 {
-        void * allocation;
-       
-        lock();
-        allocation= memalign(bytesPerPage, size);
-        unlock();
-       
-        return allocation;
+	return memalign(bytesPerPage, size);
 }
+
+
+#ifdef __hpux
+/*
+ * HP-UX 8/9.01 strcat reads a word past source when doing unaligned copies!
+ * Work around it here. The bug report has been filed with HP.
+ */
+char *strcat(char *d, const char *s)
+{
+	strcpy(d+strlen(d), s);
+	return d;
+}
+#endif

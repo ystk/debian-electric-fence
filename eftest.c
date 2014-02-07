@@ -12,11 +12,10 @@
  */
 
 #ifndef	PAGE_PROTECTION_VIOLATED_SIGNAL
-#ifdef __FreeBSD_kernel__
-#define        PAGE_PROTECTION_VIOLATED_SIGNAL SIGBUS
-#else
-#define	PAGE_PROTECTION_VIOLATED_SIGNAL	SIGSEGV
+#if defined(__FreeBSD_kernel__) || defined(__FreeBSD__)
+#define EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL SIGBUS
 #endif
+#define        PAGE_PROTECTION_VIOLATED_SIGNAL SIGSEGV
 #endif
 
 struct diagnostic {
@@ -44,6 +43,9 @@ int signalNumber
 )
  {
 	signal(PAGE_PROTECTION_VIOLATED_SIGNAL, SIG_DFL);
+#ifdef EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL
+       signal(EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL, SIG_DFL);
+#endif
 	siglongjmp(env, 1);
 }
 
@@ -53,10 +55,18 @@ gotSegmentationFault(int (*test)(void))
 	if ( sigsetjmp(env,1) == 0 ) {
 		int			status;
 
-		signal(PAGE_PROTECTION_VIOLATED_SIGNAL
-		,segmentationFaultHandler);
+               signal(PAGE_PROTECTION_VIOLATED_SIGNAL, 
+		      segmentationFaultHandler);
+#ifdef EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL
+                signal(EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL, 
+		       segmentationFaultHandler);
+#endif
+
 		status = (*test)();
 		signal(PAGE_PROTECTION_VIOLATED_SIGNAL, SIG_DFL);
+#ifdef EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL
+               signal(EXTRA_PAGE_PROTECTION_VIOLATED_SIGNAL, SIG_DFL);
+#endif
 		return status;
 	}
 	else

@@ -2,14 +2,14 @@ Source: electric-fence
 Section: devel
 Priority: extra
 Maintainer: Matthew Vernon <matthew@debian.org>
-Build-Depends: debhelper
-Standards-Version: 3.2.1.0
+Build-Depends: debhelper (>= 8)
+Standards-Version: 3.9.1
 
 Package: electric-fence
 Section: devel
 Priority: extra
 Architecture: any
-Depends: ${shlibs:Depends}
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: A malloc(3) debugger
  Electric Fence is a debugger that uses virtual memory hardware to detect
  illegal memory accesses. It can detect two common programming bugs: software

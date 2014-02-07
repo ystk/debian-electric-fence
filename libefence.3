@@ -40,6 +40,12 @@ void * memalign (size_t alignment, size_t size);
 .LP
 .nf
 .ft B
+int posix_memalign (void ** memptr, size_t alignment, size_t size);
+.ft
+.fi
+.LP
+.nf
+.ft B
 void * valloc (size_t size);
 .ft
 .fi
@@ -76,7 +82,7 @@ extern int EF_ALLOW_MALLOC_0;
 .LP
 .nf
 .ft B
-extern int EF_FREE_WIPES;
+extern int EF_FILL;
 .ft
 .fi
 .SH DESCRIPTION
@@ -123,16 +129,17 @@ has installed Electric Fence for public use, you'll be able to use the
 argument to the linker, otherwise you'll have to put the path-name for
 .B libefence.a
 in the linker's command line.
+You can also use dynamic linking. If you're using a Bourne shell, the
+statement 
+.B export LD_PRELOAD=libefence.so.0.0
+will cause Electric Fence to be loaded to run all dynamic executables.
+The command
+.B ef
+.I command
+runs a single command under Electric Fence.
+.LP
 Some systems will require special arguments to the linker to assure that
 you are using the Electric Fence malloc() and not the one from your C library.
-On AIX systems, you may have to use the flags
-.br
-.B -bnso
-.B -bnodelcsect
-.B -bI:/lib/syscalls.exp
-.br
-On Sun systems running SunOS 4.X, you'll probably have to use
-.B -Bstatic.
 .LP
 Run your program
 .I using a debugger. 
@@ -222,12 +229,12 @@ To change this value, set EF_ALLOW_MALLOC_0 in the shell environment to an
 integer value, or assign to the global integer variable EF_ALLOW_MALLOC_0 using
 a debugger.
 .TP
-EF_FREE_WIPES
-By default, Electric Fence releases memory without changing the content
-of the released memory block.  IF EF_FREE_WIPES is non-zero, the sofware
-will fill the memory block with 0xbd values before it is released.
-This makes it easier to trigger illegal use of released memory, and eaiser
-to understand why a memory access failed during gdb runs.
+EF_FILL
+When set to a value between 0 and 255, every byte of allocated memory is
+initialized to that value. This can help detect reads of uninitialized memory.
+When set to -1, some memory is filled with zeroes
+(the operating system default on most systems) and some memory will retain
+the values written to it during its last use.
 .SH WORD-ALIGNMENT AND OVERRUN DETECTION
 There is a conflict between the alignment restrictions that malloc() operates
 under and the debugging strategy used by Electric Fence. When detecting
@@ -321,25 +328,6 @@ and use more resources while you are debugging it with Electric Fence.
 .LP
 Don't leave libefence.a linked into production software! Use it only
 for debugging.
-.SH PORTING
-Electric Fence is written for ANSI C. You should be able to port it with
-simple changes to the Makefile and to page.c,
-which contains the memory management primitives .
-Many POSIX platforms will require only a re-compile.
-The operating system facilities required to port Electric Fence are:
-.IP
-A way to allocate memory pages
-.br
-A way to make selected pages inaccessible.
-.br
-A way to make the pages accessible again.
-.br
-A way to detect when a program touches an inaccessible page.
-.br
-A way to print messages.
-.LP
-Please e-mail me a copy of any changes you have to make, so that I can
-merge them into the distribution.
 .SH AUTHOR
 Bruce Perens
 .SH WARNINGS
@@ -347,16 +335,8 @@ I have tried to do as good a job as I can on this software, but I doubt
 that it is even theoretically possible to make it bug-free.
 This software has no warranty. It will not detect some bugs that you might
 expect it to detect, and will indicate that some non-bugs are bugs.
-Bruce Perens and/or Pixar will not be liable to any claims resulting
-from the use of this software or the ideas within it.
-The entire responsibility for its use must
-be assumed by the user. If you use it and it results in loss of life
-and/or property, tough. If it leads you on a wild goose chase and you waste
-two weeks debugging something, too bad.
-If you can't deal with the above, please don't use the software! I've written
-this in an attempt to help other people, not to get myself sued or prosecuted.
 .SH LICENSE
-Copyright 1987-1995 Bruce Perens. All rights reserved.
+Copyright 1987-1999 Bruce Perens. All rights reserved.
 .br
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License, Version 2,
@@ -370,13 +350,10 @@ file "COPYING" for more details.
 .SH CONTACTING THE AUTHOR
 .nf
 Bruce Perens
-c/o Pixar
-1001 West Cutting Blvd., Suite 200
-Richmond, CA 94804
-
-Telephone: 510-215-3502
-Fax: 510-236-0388
-Internet: Bruce@Pixar.com
+1563 Solano Ave. #349
+Berkeley, CA 94707
+Telephone: 510-526-1165
+Internet: bruce@perens.com
 .fi
 .ft
 .SH FILES
@@ -393,7 +370,7 @@ in this manual page.
 .SH BUGS
 My explanation of the alignment issue could be improved.
 .LP
-Some Sun systems running SunOS 4.1 are reported to signal an access to a
+Some Sun systems running SunOS 4.1 were reported to signal an access to a
 protected page with
 .B  SIGBUS
 rather than
@@ -409,7 +386,11 @@ as
 There are, without doubt, other bugs and porting issues. Please contact me via
 e-mail if you have any bug reports, ideas, etc.
 .SH WHAT'S BETTER
-PURIFY, from Purify Systems, does a much better job than Electric Fence, and
-does much more. It's available at this writing on SPARC and HP.
-I'm not affiliated with Purify, I just think it's a wonderful product
-and you should check it out.
+.I Purify
+does a much more thorough job than Electric Fence, and does not have
+the huge memory overhead.
+.I Checkergcc,
+a modified version of the GNU C Compiler that instruments all memory
+references,
+is available on Linux systems and where GCC is used. It performs some of the
+same tasks as Purify, but only on code that it has compiled.

@@ -1,5 +1,6 @@
 #include <sys/types.h>
 #include <sys/param.h>
+#include <stdarg.h>
 
 /*
  * ef_number is the largest unsigned integer we'll need. On systems that
@@ -36,7 +37,9 @@ void			Page_DenyAccess(void * address, size_t size);
 size_t			Page_Size(void);
 
 void			EF_Abort(const char * message, ...);
+void			EF_Abortv(const char * message, va_list args);
 void			EF_Exit(const char * message, ...);
+void			EF_Exitv(const char * message, va_list args);
 void			EF_Print(const char * message, ...);
-void			EF_Lock();
-void			EF_UnLock();
+void			EF_Printv(const char * message, va_list args);
+void			EF_InternalError(const char * message, ...);

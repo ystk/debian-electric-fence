@@ -14,15 +14,10 @@
 # Uncomment this to turn on verbose mode.
 #export DH_VERBOSE=1
 
-
 build: build-stamp
 build-stamp:
 	dh_testdir
-	#if [ -x configure ]; then ./configure --prefix=/usr; fi
-	make CFLAGS="-O2 -g -Wall -fPIC"
-	gcc -g -shared -Wl,-soname,libefence.so.0 -o libefence.so.0.0 efence.o page.o print.o -lc -lpthread
-	rm *.o
-	make CFLAGS="-O2 -g -Wall"
+	make
 	touch build-stamp
 
 clean:
@@ -31,7 +26,7 @@ clean:
 	rm -f build-stamp
 	rm -f libefence.so.0.0
 	dh_clean
-	-$(MAKE) -i clean
+	$(MAKE) clean
 
 # Build architecture-independent files here.
 binary-indep: build
@@ -43,23 +38,23 @@ binary-arch: build
 	dh_testroot
 	dh_clean
 	dh_installdirs usr/lib usr/share/man/man3
-	install -m 644 libefence.a debian/tmp/usr/lib
-	install -m 644 libefence.so.0.0 debian/tmp/usr/lib
+	install -m 644 libefence.a debian/electric-fence/usr/lib
+	install -m 644 libefence.so.0.0 debian/electric-fence/usr/lib
 	dh_link /usr/lib/libefence.so.0.0 /usr/lib/libefence.so.0
-	#ln -s debian/tmp/usr/lib/libefence.so.0 ./libefence.so
+	#ln -s debian/electric-fence/usr/lib/libefence.so.0 ./libefence.so
 	dh_link /usr/lib/libefence.so.0 /usr/lib/libefence.so
-	install -m 644 libefence.3 debian/tmp/usr/share/man/man3/libefence.3
+	install -m 644 libefence.3 debian/electric-fence/usr/share/man/man3/libefence.3
 	dh_installdocs README debian/README.gdb
 	dh_installchangelogs
-	dh_installmanpages -pefence libefence.3
-	chown -R root.root debian/tmp
+	dh_installman libefence.3
+	chown -R root.root debian/electric-fence
 	dh_strip
 	dh_compress
 	dh_lintian
 	dh_installdeb
 	dh_fixperms
-	dh_shlibdeps debian/tmp/usr/lib/libefence.so.0.0
-	dpkg-shlibdeps debian/tmp/usr/lib/libefence.so.0.0
+	dh_shlibdeps debian/electric-fence/usr/lib/libefence.so.0.0
+	dpkg-shlibdeps debian/electric-fence/usr/lib/libefence.so.0.0
 	dh_gencontrol
 	dh_md5sums
 	dh_builddeb	

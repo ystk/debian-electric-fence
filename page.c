@@ -68,7 +68,7 @@ Page_Create(size_t size)
 	 */
 	allocation = (caddr_t) mmap(
 	 startAddr
-	,size
+	 ,(int)size
 	,PROT_READ|PROT_WRITE
 	,MAP_PRIVATE|MAP_ANONYMOUS
 	,-1
@@ -120,7 +120,7 @@ Page_Create(size_t size)
 	 */
 	allocation = (caddr_t) mmap(
 	 startAddr
-	,size
+	 ,(int)size
 	,PROT_READ|PROT_WRITE
 	,MAP_PRIVATE
 	,devZeroFd
@@ -159,6 +159,8 @@ void
 Page_Delete(void * address, size_t size)
 {
 	Page_DenyAccess(address, size);
+	/* Tell the kernel we will never need it again.  */
+	madvise(address, size, MADV_DONTNEED);
 }
 
 #if defined(_SC_PAGESIZE)

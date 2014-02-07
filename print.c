@@ -18,6 +18,19 @@
 #define	NUMBER_BUFFER_SIZE	(sizeof(ef_number) * NBBY)
 
 static void
+do_abort()
+{
+	/*
+	 * I use kill(getpid(), SIGILL) instead of abort() because some
+	 * mis-guided implementations of abort() flush stdio, which can
+	 * cause malloc() or free() to be called.
+	 */
+	kill(getpid(), SIGILL);
+	/* Just in case something handles SIGILL and returns, exit here. */
+	_exit(-1);
+}
+
+static void
 printNumber(ef_number number, ef_number base)
 {
 	char		buffer[NUMBER_BUFFER_SIZE];
@@ -45,8 +58,8 @@ printNumber(ef_number number, ef_number base)
 		write(2, s, size);
 }
 
-static void
-vprint(const char * pattern, va_list args)
+void
+EF_Printv(const char * pattern, va_list args)
 {
 	static const char	bad_pattern[] =
 	 "\nBad pattern specifier %%%c in EF_Print().\n";
@@ -117,25 +130,35 @@ vprint(const char * pattern, va_list args)
 }
 
 void
+EF_Abortv(const char * pattern, va_list args)
+{
+	EF_Print("\nElectricFence Aborting: ");
+	EF_Printv(pattern, args);
+	EF_Print("\n");
+	do_abort();
+}
+
+void
 EF_Abort(const char * pattern, ...)
 {
 	va_list	args;
 
 	va_start(args, pattern);
+	EF_Abortv(pattern, args);
+	/* Not reached: va_end(args); */
+}
 
-	EF_Print("\nElectricFence Aborting: ");
-	vprint(pattern, args);
+void
+EF_Exitv(const char * pattern, va_list args)
+{
+	EF_Print("\nElectricFence Exiting: ");
+	EF_Printv(pattern, args);
 	EF_Print("\n");
 
-	va_end(args);
-
 	/*
-	 * I use kill(getpid(), SIGILL) instead of abort() because some
-	 * mis-guided implementations of abort() flush stdio, which can
-	 * cause malloc() or free() to be called.
+	 * I use _exit() because the regular exit() flushes stdio,
+	 * which may cause malloc() or free() to be called.
 	 */
-	kill(getpid(), SIGILL);
-	/* Just in case something handles SIGILL and returns, exit here. */
 	_exit(-1);
 }
 
@@ -146,17 +169,8 @@ EF_Exit(const char * pattern, ...)
 
 	va_start(args, pattern);
 
-	EF_Print("\nElectricFence Exiting: ");
-	vprint(pattern, args);
-	EF_Print("\n");
-
-	va_end(args);
-
-	/*
-	 * I use _exit() because the regular exit() flushes stdio,
-	 * which may cause malloc() or free() to be called.
-	 */
-	_exit(-1);
+	EF_Exitv(pattern, args);
+	/* Not reached: va_end(args); */
 }
 
 void
@@ -165,6 +179,20 @@ EF_Print(const char * pattern, ...)
 	va_list	args;
 
 	va_start(args, pattern);
-	vprint(pattern, args);
+	EF_Printv(pattern, args);
 	va_end(args);
+}
+
+void
+EF_InternalError(const char * pattern, ...)
+{
+	va_list	args;
+
+	EF_Print("\nInternal error in allocator: ");
+	va_start(args, pattern);
+	EF_Printv(pattern, args);
+	EF_Print("\n");
+
+	va_end(args);
+	do_abort();
 }
